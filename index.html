@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>太悟アバター チャットボット</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    background: #f3f1ec;
+    color: #2b2b28;
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid #e2ded4;
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+  header h1 span { color: #8a8578; font-weight: 400; font-size: 12px; margin-left: 8px; }
+  .head-btns button {
+    font: inherit; font-size: 12px;
+    background: #f3f1ec; border: 1px solid #d8d3c6; border-radius: 999px;
+    padding: 6px 12px; cursor: pointer;
+  }
+  .head-btns button:hover { background: #eae7de; }
+  #settings {
+    display: none;
+    background: #fffdf7;
+    border-bottom: 1px solid #e2ded4;
+    padding: 12px 16px;
+    font-size: 13px;
+  }
+  #settings.open { display: block; }
+  #settings label { display: block; margin-bottom: 6px; color: #55524a; }
+  #settings .row { display: flex; gap: 8px; }
+  #settings input {
+    flex: 1; font: inherit; font-size: 13px;
+    padding: 8px 10px; border: 1px solid #cfcaBD; border-radius: 8px;
+  }
+  #settings button {
+    font: inherit; font-size: 13px;
+    padding: 8px 16px; border: none; border-radius: 8px;
+    background: #3f6212; color: #fff; cursor: pointer;
+  }
+  #settings p { margin-top: 8px; color: #8a8578; font-size: 12px; line-height: 1.6; }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  #stage {
+    position: relative;
+    flex: 1.1;
+    min-width: 0;
+    background: linear-gradient(180deg, #e9e6dd 0%, #dcd8cc 100%);
+  }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #stage-ui {
+    position: absolute; left: 12px; bottom: 12px;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+  }
+  #vrm-btn {
+    font: inherit; font-size: 13px;
+    background: rgba(255,255,255,0.92); border: 1px solid #c9c4b4; border-radius: 999px;
+    padding: 8px 14px; cursor: pointer;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  #vrm-btn:hover { background: #ffffff; }
+  #stage-status {
+    font-size: 12px; color: #55524a;
+    background: rgba(255,255,255,0.75);
+    padding: 4px 10px; border-radius: 999px;
+  }
+  #chat {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: #faf9f6;
+    border-left: 1px solid #e2ded4;
+  }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: #3f6212;
+    color: #fff;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.bot {
+    align-self: flex-start;
+    background: #ffffff;
+    border: 1px solid #e2ded4;
+    border-bottom-left-radius: 4px;
+  }
+  .msg.bot.error { background: #fdf1f1; border-color: #eccaca; color: #8c2f2f; }
+  .msg.bot.thinking { color: #8a8578; }
+  #composer {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid #e2ded4;
+    background: #ffffff;
+  }
+  #input {
+    flex: 1; font: inherit; font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid #cfcabd;
+    border-radius: 10px;
+    resize: none;
+    max-height: 120px;
+  }
+  #send {
+    font: inherit; font-size: 14px; font-weight: 700;
+    padding: 10px 20px;
+    border: none; border-radius: 10px;
+    background: #3f6212; color: #fff; cursor: pointer;
+  }
+  #send:disabled { background: #b9bfa9; cursor: default; }
+  #gesture-bar {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    background: rgba(255,255,255,0.85);
+    border: 1px solid #c9c4b4; border-radius: 12px;
+    padding: 6px 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  }
+  #gesture-bar .g-label { font-size: 11px; color: #55524a; margin-right: 2px; }
+  #gesture-bar button {
+    font: inherit; font-size: 12px;
+    background: #f3f1ec; border: 1px solid #d8d3c6; border-radius: 999px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  #gesture-bar button:hover { background: #eae7de; }
+  #gesture-bar button.on { background: #3f6212; color: #fff; border-color: #3f6212; }
+  #chips {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 10px 12px 0;
+    background: #faf9f6;
+  }
+  #chips button {
+    font: inherit; font-size: 12px;
+    background: #ffffff; border: 1px solid #d8d3c6; border-radius: 999px;
+    padding: 6px 12px; cursor: pointer; color: #55524a;
+  }
+  #chips button:hover { background: #f3f1ec; }
+  @media (max-width: 760px) {
+    main { flex-direction: column; }
+    #stage { flex: none; height: 42dvh; }
+    #chat { border-left: none; border-top: 1px solid #e2ded4; }
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@2.1.2/lib/three-vrm.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<header>
+  <h1>太悟アバター<span>チャットボット</span></h1>
+  <div class="head-btns">
+    <button id="voice-btn" type="button">声：オン</button>
+    <button id="settings-btn" type="button">接続設定</button>
+  </div>
+</header>
+<div id="settings">
+  <label for="gas-url">GAS中継のURL（ウェブアプリのURL）</label>
+  <div class="row">
+    <input id="gas-url" type="url" placeholder="https://script.google.com/macros/s/…/exec">
+    <button id="gas-save" type="button">保存</button>
+  </div>
+  <p>APIキーはGAS側に置くので、ここに入れるのは中継URLだけです。URLはこの端末のブラウザに保存されます。</p>
+</div>
+<main>
+  <section id="stage">
+    <div id="stage-ui">
+      <button id="vrm-btn" type="button">VRMファイルを選ぶ</button>
+      <div id="stage-status">アバター未読み込み</div>
+      <div id="gesture-bar">
+        <span class="g-label">身振りを試す</span>
+        <button type="button" data-gesture="nod">うなずき</button>
+        <button type="button" data-gesture="wave">手を振る</button>
+        <button type="button" data-gesture="bow">お辞儀</button>
+        <button type="button" id="talk-toggle">話し手ぶり</button>
+        <button type="button" id="think-toggle">考え中ポーズ</button>
+      </div>
+    </div>
+    <input id="vrm-file" type="file" accept=".vrm" hidden>
+  </section>
+  <section id="chat">
+    <div id="messages"></div>
+    <div id="chips">
+      <button type="button" data-chip="自己紹介して">自己紹介して</button>
+      <button type="button" data-chip="探究で大事にしていることを教えて">探究で大事にしていること</button>
+      <button type="button" data-chip="ありがとう">ありがとう</button>
+    </div>
+    <form id="composer">
+      <textarea id="input" rows="1" placeholder="太悟アバターに話しかける…"></textarea>
+      <button id="send" type="submit">送る</button>
+    </form>
+  </section>
+</main>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+
+/* ============ アバター表示 ============ */
+const stage = document.getElementById('stage');
+const stageStatus = document.getElementById('stage-status');
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+camera.position.set(0, 1.3, 2.0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.prepend(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8578, 0.9));
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+dirLight.position.set(1.5, 2.5, 2.5);
+scene.add(dirLight);
+
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  if (!w || !h) return;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+let vrm = null;
+let typingActive = false;  // 返答テキストを表示中
+let speechActive = false;  // 音声を再生中
+let manualTalk = false;    // 「話し手ぶり」トグル（手動）
+window.__setTyping = (v) => { typingActive = v; };
+window.__setSpeech = (v) => { speechActive = v; };
+window.__setManualTalk = (v) => { manualTalk = v; };
+let blinkTimer = 0;
+let nextBlink = 2.0;
+let blinkPhase = -1;       // -1: まばたきしていない
+
+function setExpr(name, value) {
+  if (!vrm || !vrm.expressionManager) return;
+  try {
+    if (vrm.expressionManager.getExpression(name)) {
+      vrm.expressionManager.setValue(name, value);
+    }
+  } catch (e) { /* 表情がないモデルでは何もしない */ }
+}
+
+function frameAvatar() {
+  const box = new THREE.Box3().setFromObject(vrm.scene);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const targetY = box.min.y + size.y * 0.78;
+  const dist = size.y * 1.05;
+  camera.position.set(center.x, targetY, center.z + dist);
+  camera.lookAt(center.x, targetY, center.z);
+}
+
+function poseArmsDown() {
+  if (!vrm.humanoid) return;
+  const bone = (name) => vrm.humanoid.getNormalizedBoneNode(name);
+  const lua = bone('leftUpperArm'), rua = bone('rightUpperArm');
+  const lla = bone('leftLowerArm'), rla = bone('rightLowerArm');
+  if (lua) lua.rotation.z = 1.15;
+  if (rua) rua.rotation.z = -1.15;
+  if (lla) lla.rotation.z = 0.18;
+  if (rla) rla.rotation.z = -0.18;
+}
+
+/* ============ 身振り（ジェスチャー） ============ */
+const ARM_BASE = { luaZ: 1.15, ruaZ: -1.15, llaZ: 0.18, rlaZ: -0.18 };
+let talkWeight = 0;      // 話している間の手ぶりの強さ（0→1で滑らかに追随）
+let thinkWeight = 0;     // 考え中ポーズの強さ
+let thinkingPose = false;
+let activeGesture = null; // { name, t }
+window.__setThinking = (v) => { thinkingPose = v; };
+window.__playGesture = (name) => {
+  // 手振り・お辞儀の最中に、文ごとのうなずきで上書きしない
+  if (name === 'nod' && activeGesture && activeGesture.name !== 'nod' && activeGesture.t < 1.0) return;
+  activeGesture = { name: name, t: 0 };
+};
+function smooth01(x) { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); }
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const delta = clock.getDelta();
+  const t = clock.elapsedTime;
+
+  if (vrm) {
+    // 待機モーション＋身振り
+    const bone = (name) => vrm.humanoid && vrm.humanoid.getNormalizedBoneNode(name);
+    const head = bone('head');
+    const spine = bone('spine');
+    const lua = bone('leftUpperArm'), rua = bone('rightUpperArm');
+    const lla = bone('leftLowerArm'), rla = bone('rightLowerArm');
+
+    const talking = (typingActive || speechActive || manualTalk) ? 1 : 0;
+    talkWeight += (talking - talkWeight) * Math.min(1, delta * 5);
+    thinkWeight += ((thinkingPose ? 1 : 0) - thinkWeight) * Math.min(1, delta * 5);
+
+    // ジェスチャーの進行（うなずき／手を振る／お辞儀）
+    // 実測で確定した向き：背骨・頭の pitch は −x が前傾。前腕の y が前方屈曲、手のひらは前腕＋手の x ねじりで作る
+    let gHeadX = 0, gSpineX = 0;
+    let waveEnv = 0, waveOsc = 0;
+    if (activeGesture) {
+      activeGesture.t += delta;
+      const gt = activeGesture.t;
+      if (activeGesture.name === 'nod') {
+        const p = gt / 0.55;
+        if (p >= 1) activeGesture = null;
+        else gHeadX = -0.15 * Math.sin(p * Math.PI * 2) * (1 - p * 0.25);
+      } else if (activeGesture.name === 'wave') {
+        const p = gt / 2.6;
+        if (p >= 1) activeGesture = null;
+        else {
+          waveEnv = smooth01(p / 0.15) * (1 - smooth01((p - 0.82) / 0.18));
+          waveOsc = Math.sin(gt * 7.0);
+        }
+      } else if (activeGesture.name === 'bow') {
+        // 2.0秒：0.5秒で倒れ、約0.9秒静止、0.6秒で戻る台形
+        const p = gt / 2.0;
+        if (p >= 1) activeGesture = null;
+        else {
+          const env = Math.min(1, smooth01(gt / 0.5), 1 - smooth01((gt - 1.4) / 0.6));
+          gSpineX = -0.26 * env;
+          gHeadX = -0.16 * env;
+        }
+      } else {
+        activeGesture = null;
+      }
+    }
+    const thinkActive = thinkWeight > 0.01 && waveEnv <= 0.01;
+
+    if (head) {
+      head.rotation.z = Math.sin(t * 0.5) * 0.03 + 0.20 * thinkWeight;
+      head.rotation.x = Math.sin(t * 0.8) * 0.02 + ((typingActive || speechActive) ? Math.sin(t * 2.2) * 0.015 : 0) + gHeadX;
+      head.rotation.y = Math.sin(t * 0.23) * 0.05 + 0.28 * thinkWeight;
+    }
+    if (spine) {
+      spine.rotation.x = Math.sin(t * 1.4) * 0.008 + gSpineX; // 呼吸っぽい動き＋お辞儀
+    }
+    // 腕：基本ポーズ＋話し手ぶり（前腕の y 屈曲）＋考え中ポーズ（前腕 y 2.2）＋手を振る
+    if (lua) { lua.rotation.z = ARM_BASE.luaZ; lua.rotation.x = 0.05 * Math.sin(t * 1.3) * talkWeight; lua.rotation.y = 0; }
+    if (lla) {
+      lla.rotation.z = ARM_BASE.llaZ;
+      lla.rotation.x = 0;
+      lla.rotation.y = -(0.55 + 0.25 * Math.sin(t * 2.6 + 1.7)) * talkWeight;
+    }
+    if (rua) {
+      // 手を振る：上腕 z 合計 +0.10（ほぼ水平）、y +0.68 で手を顔の深さより前へ
+      rua.rotation.z = ARM_BASE.ruaZ + 1.25 * waveEnv;
+      rua.rotation.y = 0.68 * waveEnv;
+      rua.rotation.x = -0.05 * Math.sin(t * 1.3) * talkWeight * (1 - waveEnv);
+    }
+    if (rla) {
+      // 手を振る：肘 z 合計 1.32 のL字＋小さな往復／考え中：y 屈曲 2.2（胸の前）
+      rla.rotation.z = ARM_BASE.rlaZ + 1.50 * waveEnv + 0.10 * waveOsc * waveEnv;
+      rla.rotation.x = 0.466 * waveEnv;
+      rla.rotation.y = (0.55 + 0.25 * Math.sin(t * 2.6)) * talkWeight * (1 - waveEnv) + (thinkActive ? 2.2 * thinkWeight : 0);
+    }
+    const rHand = bone('rightHand');
+    if (rHand) rHand.rotation.x = 1.094 * waveEnv;
+    // 指：z の負方向が自然なカール。考え中は軽く、手を振るはごく軽く
+    const curl = thinkActive ? thinkWeight : 0.35 * waveEnv;
+    if (curl > 0.001) {
+      const fingers = ['Index', 'Middle', 'Ring', 'Little'];
+      for (const f of fingers) {
+        const prox = bone('right' + f + 'Proximal');
+        const inter = bone('right' + f + 'Intermediate');
+        const dist = bone('right' + f + 'Distal');
+        if (prox) prox.rotation.z = -0.35 * curl;
+        if (inter) inter.rotation.z = -0.45 * curl;
+        if (dist) dist.rotation.z = -0.30 * curl;
+      }
+      const tProx = bone('rightThumbProximal');
+      const tInter = bone('rightThumbIntermediate');
+      if (tProx) tProx.rotation.z = -0.15 * curl;
+      if (tInter) tInter.rotation.z = -0.20 * curl;
+    }
+    // まばたき
+    blinkTimer += delta;
+    if (blinkPhase < 0 && blinkTimer >= nextBlink) {
+      blinkPhase = 0;
+      blinkTimer = 0;
+    }
+    if (blinkPhase >= 0) {
+      blinkPhase += delta / 0.18;
+      const v = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
+      setExpr('blink', Math.max(0, Math.min(1, v)));
+      if (blinkPhase >= 1) {
+        blinkPhase = -1;
+        setExpr('blink', 0);
+        nextBlink = 2.2 + Math.random() * 2.4;
+      }
+    }
+    // 口の動き：返答表示中／発声中だけ「あ」を波打たせる
+    if (typingActive || speechActive) {
+      setExpr('aa', 0.3 + 0.28 * (0.5 + 0.5 * Math.sin(t * 26)) * (0.6 + 0.4 * Math.sin(t * 7.3)));
+    } else {
+      setExpr('aa', 0);
+    }
+    vrm.update(delta);
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+const loader = new GLTFLoader();
+loader.register((parser) => new VRMLoaderPlugin(parser));
+
+async function loadVRM(file) {
+  stageStatus.textContent = '読み込み中…';
+  try {
+    const buffer = await file.arrayBuffer();
+    const gltf = await new Promise((resolve, reject) => {
+      loader.parse(buffer, '', resolve, reject);
+    });
+    const newVrm = gltf.userData.vrm;
+    if (!newVrm) throw new Error('VRMとして読み込めませんでした');
+    if (vrm) {
+      scene.remove(vrm.scene);
+      VRMUtils.deepDispose(vrm.scene);
+    }
+    vrm = newVrm;
+    if (vrm.meta && vrm.meta.metaVersion === '0') {
+      VRMUtils.rotateVRM0(vrm);
+    }
+    scene.add(vrm.scene);
+    poseArmsDown();
+    frameAvatar();
+    stageStatus.textContent = 'アバター表示中';
+  } catch (e) {
+    console.error(e);
+    stageStatus.textContent = '読み込みに失敗しました：' + (e && e.message ? e.message : e);
+  }
+}
+
+const vrmFile = document.getElementById('vrm-file');
+document.getElementById('vrm-btn').addEventListener('click', () => vrmFile.click());
+vrmFile.addEventListener('change', () => {
+  const f = vrmFile.files[0];
+  if (f) loadVRM(f);
+});
+stage.addEventListener('dragover', (e) => e.preventDefault());
+stage.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) loadVRM(f);
+});
+
+/* ============ 身振りテストバーの配線 ============ */
+document.querySelectorAll('#gesture-bar [data-gesture]').forEach((btn) => {
+  btn.addEventListener('click', () => window.__playGesture(btn.dataset.gesture));
+});
+function wireToggle(id, setter) {
+  const btn = document.getElementById(id);
+  let timer = null;
+  btn.addEventListener('click', () => {
+    const on = !btn.classList.contains('on');
+    btn.classList.toggle('on', on);
+    setter(on);
+    if (timer) clearTimeout(timer);
+    if (on) {
+      timer = setTimeout(() => { btn.classList.remove('on'); setter(false); }, 6000);
+    }
+  });
+}
+wireToggle('talk-toggle', (v) => window.__setManualTalk(v));
+wireToggle('think-toggle', (v) => window.__setThinking(v));
+</script>
+<script>
+/* ============ チャット ============ */
+const messagesEl = document.getElementById('messages');
+const form = document.getElementById('composer');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send');
+const GAS_KEY = 'daigoAvatarBot.gasUrl';
+const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwQynHAJe8xfX03Fdb_kRLLsv91CkQ04VwNjpar3zIPDsNJsPzYTkClVnXGgeThOoscvw/exec';
+const history = [];
+let busy = false;
+
+function storeGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function storeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 保存できない環境ではその場限り */ } }
+
+function addMsg(role, text, cls) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + (role === 'user' ? 'user' : 'bot') + (cls ? ' ' + cls : '');
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function typewriter(el, text, done) {
+  let i = 0;
+  window.__setTyping && window.__setTyping(true);
+  const timer = setInterval(() => {
+    i += 1;
+    el.textContent = text.slice(0, i);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (i >= text.length) {
+      clearInterval(timer);
+      window.__setTyping && window.__setTyping(false);
+      done && done();
+    }
+  }, 24);
+}
+
+/* ============ 音声（ブラウザ標準TTS） ============ */
+const VOICE_KEY = 'daigoAvatarBot.voice';
+let voiceOn = storeGet(VOICE_KEY) !== 'off';
+const voiceBtn = document.getElementById('voice-btn');
+function refreshVoiceBtn() { voiceBtn.textContent = voiceOn ? '声：オン' : '声：オフ'; }
+voiceBtn.addEventListener('click', () => {
+  voiceOn = !voiceOn;
+  storeSet(VOICE_KEY, voiceOn ? 'on' : 'off');
+  if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  refreshVoiceBtn();
+});
+refreshVoiceBtn();
+
+function pickJaVoice() {
+  const voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith('ja'));
+  if (!voices.length) return null;
+  return voices.find(v => /ichiro|otoya/i.test(v.name)) || voices[0];
+}
+
+let speechQueue = 0;
+function speakText(text) {
+  if (!voiceOn || !('speechSynthesis' in window)) return;
+  const clean = text.replace(/[*#`>]/g, '').replace(/https?:\/\/\S+/g, 'リンク').trim();
+  if (!clean) return;
+  const chunks = clean.match(/[^。！？\n]+[。！？]?/g) || [clean];
+  const voice = pickJaVoice();
+  speechQueue = 0;
+  chunks.forEach((chunk) => {
+    const s = chunk.trim();
+    if (!s) return;
+    const u = new SpeechSynthesisUtterance(s);
+    if (voice) u.voice = voice;
+    u.lang = 'ja-JP';
+    u.rate = 1.05;
+    u.pitch = 0.9;
+    speechQueue += 1;
+    u.onstart = () => {
+      window.__setSpeech && window.__setSpeech(true);
+      window.__playGesture && window.__playGesture('nod');
+    };
+    u.onend = u.onerror = () => {
+      speechQueue -= 1;
+      if (speechQueue <= 0) window.__setSpeech && window.__setSpeech(false);
+    };
+    speechSynthesis.speak(u);
+  });
+}
+
+async function send(text) {
+  const gasUrl = (storeGet(GAS_KEY) || DEFAULT_GAS_URL).trim();
+  history.push({ role: 'user', content: text });
+  addMsg('user', text);
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  window.__setSpeech && window.__setSpeech(false);
+  if (!gasUrl) {
+    addMsg('bot', '接続設定がまだです。右上の「接続設定」から、GAS中継のURLを保存してください。', 'error');
+    return;
+  }
+  busy = true;
+  sendBtn.disabled = true;
+  const thinking = addMsg('bot', '考え中…', 'thinking');
+  window.__setThinking && window.__setThinking(true);
+  let resp;
+  try {
+    resp = await fetch(gasUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ messages: history.slice(-20) })
+    });
+  } catch (e) {
+    thinking.remove();
+    addMsg('bot', '通信に失敗しました（接続レベルの例外）。\n理由：' + (e && e.name ? e.name : 'Error') + '：' + (e && e.message ? e.message : e) + '\n送信先：' + gasUrl, 'error');
+    busy = false;
+    sendBtn.disabled = false;
+    window.__setThinking && window.__setThinking(false);
+    input.focus();
+    return;
+  }
+  try {
+    const rawText = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (e) {
+      thinking.remove();
+      addMsg('bot', '通信に失敗しました（JSONでない応答）。\nHTTP ' + resp.status + '\n応答の先頭：' + rawText.slice(0, 200), 'error');
+      return;
+    }
+    thinking.remove();
+    if (!resp.ok) {
+      addMsg('bot', '通信に失敗しました（HTTPステータス異常）。\nHTTP ' + resp.status + '\n応答の先頭：' + rawText.slice(0, 200), 'error');
+      return;
+    }
+    if (data.error) {
+      addMsg('bot', 'エラー：' + data.error + (data.detail ? '\n' + data.detail : ''), 'error');
+    } else if (data.reply) {
+      const el = addMsg('bot', '');
+      typewriter(el, data.reply, () => {
+        history.push({ role: 'assistant', content: data.reply });
+      });
+      speakText(data.reply);
+      if (/^(こんにちは|こんばんは|おはよう|やあ|どうも)/.test(data.reply)) {
+        window.__playGesture && window.__playGesture('wave');
+      } else if (/ありがとう/.test(data.reply)) {
+        window.__playGesture && window.__playGesture('bow');
+      } else {
+        window.__playGesture && window.__playGesture('nod');
+      }
+    } else {
+      addMsg('bot', '返答が空でした。もう一度試してください。', 'error');
+    }
+  } catch (e) {
+    thinking.remove();
+    addMsg('bot', '通信に失敗しました（応答の処理中の例外）。\n理由：' + (e && e.name ? e.name : 'Error') + '：' + (e && e.message ? e.message : e), 'error');
+  } finally {
+    busy = false;
+    sendBtn.disabled = false;
+    window.__setThinking && window.__setThinking(false);
+    input.focus();
+  }
+}
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || busy) return;
+  input.value = '';
+  input.style.height = 'auto';
+  send(text);
+});
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+input.addEventListener('input', () => {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+});
+
+/* ============ クイックプロンプト ============ */
+document.querySelectorAll('#chips [data-chip]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (!busy) send(btn.dataset.chip);
+  });
+});
+
+/* ============ 設定 ============ */
+const settingsEl = document.getElementById('settings');
+const gasUrlInput = document.getElementById('gas-url');
+gasUrlInput.value = storeGet(GAS_KEY) || DEFAULT_GAS_URL;
+document.getElementById('settings-btn').addEventListener('click', () => {
+  settingsEl.classList.toggle('open');
+});
+document.getElementById('gas-save').addEventListener('click', () => {
+  storeSet(GAS_KEY, gasUrlInput.value.trim());
+  settingsEl.classList.remove('open');
+  addMsg('bot', '接続設定を保存しました。話しかけてみてください。');
+});
+
+addMsg('bot', 'こんにちは、太悟の分身AIです。左の「VRMファイルを選ぶ」からアバターを読み込むと姿が出ます。仕事のこと、探究のこと、なんでも聞いてみてください。');
+history.push({ role: 'assistant', content: 'こんにちは、太悟の分身AIです。仕事のこと、探究のこと、なんでも聞いてみてください。' });
+</script>
+</body>
+</html>
