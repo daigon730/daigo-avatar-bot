@@ -245,8 +245,8 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 stage.prepend(renderer.domElement);
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8578, 0.9));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8578, 1.9));
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.1);
 dirLight.position.set(1.5, 2.5, 2.5);
 scene.add(dirLight);
 
