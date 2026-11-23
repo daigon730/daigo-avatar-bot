@@ -282,9 +282,13 @@ resize();
 let vrm = null;
 let typingActive = false;  // 返答テキストを表示中
 let speechActive = false;  // 音声を再生中
+let speechUntil = -1;      // 推定発声ウィンドウの終了時刻（イベントが来ない環境向け）
 let manualTalk = false;    // 「話し手ぶり」トグル（手動）
+let mouthValueNow = 0;
+let debugInfo = '';
 window.__setTyping = (v) => { typingActive = v; };
 window.__setSpeech = (v) => { speechActive = v; };
+window.__setSpeechWindow = (sec) => { speechUntil = clock.elapsedTime + Math.max(0, sec); };
 window.__setManualTalk = (v) => { manualTalk = v; };
 let blinkTimer = 0;
 let nextBlink = 2.0;
@@ -360,7 +364,8 @@ function animate() {
     const lua = bone('leftUpperArm'), rua = bone('rightUpperArm');
     const lla = bone('leftLowerArm'), rla = bone('rightLowerArm');
 
-    const talking = (typingActive || speechActive || manualTalk) ? 1 : 0;
+    const speechNow = speechActive || t < speechUntil;
+    const talking = (typingActive || speechNow || manualTalk) ? 1 : 0;
     talkWeight += (talking - talkWeight) * Math.min(1, delta * 5);
     thinkWeight += ((thinkingPose ? 1 : 0) - thinkWeight) * Math.min(1, delta * 5);
 
@@ -464,9 +469,10 @@ function animate() {
     let mouthValue = 0;
     if (t < mouthTestUntil) {
       mouthValue = 0.85;
-    } else if (typingActive || speechActive) {
+    } else if (typingActive || speechNow) {
       mouthValue = 0.3 + 0.28 * (0.5 + 0.5 * Math.sin(t * 26)) * (0.6 + 0.4 * Math.sin(t * 7.3));
     }
+    mouthValueNow = mouthValue;
     vrm.update(delta);
     // 表情マネージャーが毎フレーム値を書き戻すため、モーフ直接指定と表情指定の両方を update の後に適用する
     if (mouthMorph) mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = mouthValue;
@@ -477,6 +483,19 @@ function animate() {
   renderer.render(scene, camera);
 }
 animate();
+
+// 診断表示：発声まわりの状態を左下にライブ表示する
+setInterval(() => {
+  const dbg = document.getElementById('debug-line');
+  if (!dbg || !vrm) return;
+  const ss = window.speechSynthesis;
+  dbg.textContent = debugInfo +
+    ' ／ T:' + (typingActive ? 1 : 0) +
+    ' S:' + (speechActive ? 1 : 0) +
+    ' W:' + (clock.elapsedTime < speechUntil ? 1 : 0) +
+    ' SS:' + (ss && ss.speaking ? 1 : 0) +
+    ' 口:' + mouthValueNow.toFixed(2);
+}, 400);
 
 const loader = new GLTFLoader();
 loader.register((parser) => new VRMLoaderPlugin(parser));
@@ -524,8 +543,9 @@ async function loadVRM(file) {
         }
       }
     } catch (e) {}
+    debugInfo = '表情: ' + (exprNames.join(', ') || 'なし') + ' ／ 口モーフ: ' + (mouthMorph ? (mouthMorph.mesh.name || 'mesh') + '#' + mouthMorph.index : '未検出');
     const dbg = document.getElementById('debug-line');
-    if (dbg) dbg.textContent = '表情: ' + (exprNames.join(', ') || 'なし') + ' ／ 口モーフ: ' + (mouthMorph ? (mouthMorph.mesh.name || 'mesh') + '#' + mouthMorph.index : '未検出');
+    if (dbg) dbg.textContent = debugInfo;
   } catch (e) {
     console.error(e);
     stageStatus.textContent = '読み込みに失敗しました：' + (e && e.message ? e.message : e);
@@ -625,26 +645,12 @@ function pickJaVoice() {
   return voices.find(v => /ichiro|otoya/i.test(v.name)) || voices[0];
 }
 
-let watchTimer = null;
-function watchSpeechSynthesis() {
-  // 発声イベント（onstart/onend）はブラウザ・音声の種類で発火しないことがあるため、
-  // speechSynthesis.speaking のポーリングで口の動きを駆動する
-  window.__setSpeech && window.__setSpeech(true);
-  if (watchTimer) return;
-  watchTimer = setInterval(() => {
-    const active = ('speechSynthesis' in window) && (speechSynthesis.speaking || speechSynthesis.pending);
-    if (!active) {
-      clearInterval(watchTimer);
-      watchTimer = null;
-      window.__setSpeech && window.__setSpeech(false);
-    }
-  }, 180);
-}
-
 function speakBrowserChunks(chunks) {
   if (!('speechSynthesis' in window)) return;
   const voice = pickJaVoice();
-  watchSpeechSynthesis();
+  // 発声イベントは環境で発火しないことがあるため、文字数からの推定ウィンドウで口を駆動する
+  const totalChars = chunks.reduce((n, s) => n + s.length, 0);
+  if (window.__setSpeechWindow) window.__setSpeechWindow(Math.max(1.2, totalChars * 0.14));
   chunks.forEach((s) => {
     if (!s) return;
     const u = new SpeechSynthesisUtterance(s);
@@ -718,7 +724,7 @@ function playBlob(blob) {
 
 function cancelSpeech() {
   speakGen += 1;
-  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
+  if (window.__setSpeechWindow) window.__setSpeechWindow(0);
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
   window.__setSpeech && window.__setSpeech(false);
