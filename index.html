@@ -41,7 +41,7 @@
   #settings.open { display: block; }
   #settings label { display: block; margin-bottom: 6px; color: #55524a; }
   #settings .row { display: flex; gap: 8px; }
-  #settings input {
+  #settings input, #settings select {
     flex: 1; font: inherit; font-size: 13px;
     padding: 8px 10px; border: 1px solid #cfcaBD; border-radius: 8px;
   }
@@ -197,6 +197,16 @@
     <button id="gas-save" type="button">保存</button>
   </div>
   <p>APIキーはGAS側に置くので、ここに入れるのは中継URLだけです。URLはこの端末のブラウザに保存されます。</p>
+  <label for="voice-engine">音声エンジン（AivisSpeechは、この端末で起動していると使えます）</label>
+  <div class="row">
+    <select id="voice-engine">
+      <option value="auto">自動（AivisSpeech優先）</option>
+      <option value="browser">ブラウザ標準</option>
+    </select>
+    <input id="aivis-speaker" type="number" min="0" step="1" value="0" title="AivisSpeechの話者ID" style="flex: 0 0 84px;">
+    <button id="voice-save" type="button">保存</button>
+  </div>
+  <p id="aivis-status">AivisSpeech：未確認</p>
 </div>
 <main>
   <section id="stage">
@@ -271,12 +281,21 @@ let blinkTimer = 0;
 let nextBlink = 2.0;
 let blinkPhase = -1;       // -1: まばたきしていない
 
+const EXPR_ALIASES = { aa: ['aa', 'a'], blink: ['blink'] };
+const exprNameCache = {};
 function setExpr(name, value) {
   if (!vrm || !vrm.expressionManager) return;
   try {
-    if (vrm.expressionManager.getExpression(name)) {
-      vrm.expressionManager.setValue(name, value);
+    let resolved = exprNameCache[name];
+    if (resolved === undefined) {
+      resolved = null;
+      const candidates = EXPR_ALIASES[name] || [name];
+      for (const c of candidates) {
+        if (vrm.expressionManager.getExpression(c)) { resolved = c; break; }
+      }
+      exprNameCache[name] = resolved;
     }
+    if (resolved) vrm.expressionManager.setValue(resolved, value);
   } catch (e) { /* 表情がないモデルでは何もしない */ }
 }
 
@@ -457,6 +476,7 @@ async function loadVRM(file) {
       VRMUtils.deepDispose(vrm.scene);
     }
     vrm = newVrm;
+    for (const k in exprNameCache) delete exprNameCache[k];
     if (vrm.meta && vrm.meta.metaVersion === '0') {
       VRMUtils.rotateVRM0(vrm);
     }
@@ -541,7 +561,7 @@ function typewriter(el, text, done) {
   }, 24);
 }
 
-/* ============ 音声（ブラウザ標準TTS） ============ */
+/* ============ 音声（AivisSpeech／ブラウザ標準TTS） ============ */
 const VOICE_KEY = 'daigoAvatarBot.voice';
 let voiceOn = storeGet(VOICE_KEY) !== 'off';
 const voiceBtn = document.getElementById('voice-btn');
@@ -549,7 +569,7 @@ function refreshVoiceBtn() { voiceBtn.textContent = voiceOn ? '声：オン' : '
 voiceBtn.addEventListener('click', () => {
   voiceOn = !voiceOn;
   storeSet(VOICE_KEY, voiceOn ? 'on' : 'off');
-  if (!voiceOn && 'speechSynthesis' in window) speechSynthesis.cancel();
+  if (!voiceOn && window.__cancelSpeech) window.__cancelSpeech();
   refreshVoiceBtn();
 });
 refreshVoiceBtn();
@@ -561,15 +581,11 @@ function pickJaVoice() {
 }
 
 let speechQueue = 0;
-function speakText(text) {
-  if (!voiceOn || !('speechSynthesis' in window)) return;
-  const clean = text.replace(/[*#`>]/g, '').replace(/https?:\/\/\S+/g, 'リンク').trim();
-  if (!clean) return;
-  const chunks = clean.match(/[^。！？\n]+[。！？]?/g) || [clean];
+function speakBrowserChunks(chunks) {
+  if (!('speechSynthesis' in window)) return;
   const voice = pickJaVoice();
   speechQueue = 0;
-  chunks.forEach((chunk) => {
-    const s = chunk.trim();
+  chunks.forEach((s) => {
     if (!s) return;
     const u = new SpeechSynthesisUtterance(s);
     if (voice) u.voice = voice;
@@ -589,12 +605,106 @@ function speakText(text) {
   });
 }
 
+/* ---- AivisSpeech（VOICEVOX互換API・この端末の 127.0.0.1:10101） ---- */
+const ENGINE_KEY = 'daigoAvatarBot.voiceEngine';
+const SPEAKER_KEY = 'daigoAvatarBot.aivisSpeaker';
+const AIVIS_BASE = 'http://127.0.0.1:10101';
+let aivisState = { ok: null, checkedAt: 0 };
+let speakGen = 0;
+let currentAudio = null;
+
+async function probeAivis(force) {
+  const now = Date.now();
+  if (!force && aivisState.ok !== null && now - aivisState.checkedAt < 60000) return aivisState.ok;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
+    const resp = await fetch(AIVIS_BASE + '/version', { signal: ctrl.signal });
+    clearTimeout(timer);
+    aivisState = { ok: resp.ok, checkedAt: now };
+  } catch (e) {
+    aivisState = { ok: false, checkedAt: now };
+  }
+  return aivisState.ok;
+}
+
+function aivisSpeakerId() {
+  const v = parseInt(storeGet(SPEAKER_KEY) || '0', 10);
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+async function fetchAivisAudio(text, speaker) {
+  const q = await fetch(AIVIS_BASE + '/audio_query?speaker=' + speaker + '&text=' + encodeURIComponent(text), { method: 'POST' });
+  if (!q.ok) throw new Error('audio_query HTTP ' + q.status);
+  const query = await q.json();
+  query.speedScale = 1.05;
+  const s = await fetch(AIVIS_BASE + '/synthesis?speaker=' + speaker, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(query)
+  });
+  if (!s.ok) throw new Error('synthesis HTTP ' + s.status);
+  return await s.blob();
+}
+
+function playBlob(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    currentAudio = audio;
+    audio.onplaying = () => {
+      window.__setSpeech && window.__setSpeech(true);
+      window.__playGesture && window.__playGesture('nod');
+    };
+    audio.onended = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; resolve(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); if (currentAudio === audio) currentAudio = null; reject(new Error('audio playback failed')); };
+    audio.play().catch(reject);
+  });
+}
+
+function cancelSpeech() {
+  speakGen += 1;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
+  window.__setSpeech && window.__setSpeech(false);
+}
+window.__cancelSpeech = cancelSpeech;
+
+async function speakText(text) {
+  if (!voiceOn) return;
+  const clean = text.replace(/[*#`>]/g, '').replace(/https?:\/\/\S+/g, 'リンク').trim();
+  if (!clean) return;
+  const chunks = (clean.match(/[^。！？\n]+[。！？]?/g) || [clean]).map((s) => s.trim()).filter(Boolean);
+  if (!chunks.length) return;
+  const engine = storeGet(ENGINE_KEY) || 'auto';
+  if (engine === 'auto' && (await probeAivis(false))) {
+    const gen = speakGen;
+    const speaker = aivisSpeakerId();
+    let idx = 0;
+    try {
+      for (; idx < chunks.length; idx++) {
+        if (gen !== speakGen) return;
+        const blob = await fetchAivisAudio(chunks[idx], speaker);
+        if (gen !== speakGen) return;
+        await playBlob(blob);
+      }
+      window.__setSpeech && window.__setSpeech(false);
+      return;
+    } catch (e) {
+      aivisState = { ok: false, checkedAt: Date.now() };
+      window.__setSpeech && window.__setSpeech(false);
+      speakBrowserChunks(chunks.slice(idx));
+      return;
+    }
+  }
+  speakBrowserChunks(chunks);
+}
+
 async function send(text) {
   const gasUrl = (storeGet(GAS_KEY) || DEFAULT_GAS_URL).trim();
   history.push({ role: 'user', content: text });
   addMsg('user', text);
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
-  window.__setSpeech && window.__setSpeech(false);
+  if (window.__cancelSpeech) window.__cancelSpeech();
   if (!gasUrl) {
     addMsg('bot', '接続設定がまだです。右上の「接続設定」から、GAS中継のURLを保存してください。', 'error');
     return;
@@ -700,6 +810,28 @@ document.getElementById('gas-save').addEventListener('click', () => {
   storeSet(GAS_KEY, gasUrlInput.value.trim());
   settingsEl.classList.remove('open');
   addMsg('bot', '接続設定を保存しました。話しかけてみてください。');
+});
+
+/* ============ 音声エンジン設定 ============ */
+const engineSel = document.getElementById('voice-engine');
+const speakerInput = document.getElementById('aivis-speaker');
+const aivisStatus = document.getElementById('aivis-status');
+engineSel.value = storeGet(ENGINE_KEY) || 'auto';
+speakerInput.value = storeGet(SPEAKER_KEY) || '0';
+async function refreshAivisStatus() {
+  const ok = await probeAivis(true);
+  aivisStatus.textContent = ok
+    ? 'AivisSpeech：接続できました。この端末のAivisSpeechで読み上げます。'
+    : 'AivisSpeech：接続できませんでした。起動していないときはブラウザ標準の声で読み上げます。';
+}
+document.getElementById('voice-save').addEventListener('click', () => {
+  storeSet(ENGINE_KEY, engineSel.value);
+  storeSet(SPEAKER_KEY, speakerInput.value.trim() || '0');
+  aivisStatus.textContent = 'AivisSpeech：確認中…';
+  refreshAivisStatus();
+});
+document.getElementById('settings-btn').addEventListener('click', () => {
+  if (settingsEl.classList.contains('open')) refreshAivisStatus();
 });
 
 addMsg('bot', 'こんにちは、太悟の分身AIです。左の「VRMファイルを選ぶ」からアバターを読み込むと姿が出ます。仕事のこと、探究のこと、なんでも聞いてみてください。');
