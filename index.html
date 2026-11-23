@@ -648,9 +648,20 @@ function pickJaVoice() {
 function speakBrowserChunks(chunks) {
   if (!('speechSynthesis' in window)) return;
   const voice = pickJaVoice();
-  // 発声イベントは環境で発火しないことがあるため、文字数からの推定ウィンドウで口を駆動する
+  // 発声イベントは環境で発火しないことがあるため、文字数からの推定ウィンドウで口を駆動し、
+  // 実際に発声が続いている間はウィンドウを延長して途中で止まらないようにする
   const totalChars = chunks.reduce((n, s) => n + s.length, 0);
-  if (window.__setSpeechWindow) window.__setSpeechWindow(Math.max(1.2, totalChars * 0.14));
+  if (window.__setSpeechWindow) window.__setSpeechWindow(Math.max(1.2, totalChars * 0.17) + 1.0);
+  if (window.__extendTimer) clearInterval(window.__extendTimer);
+  window.__extendTimer = setInterval(() => {
+    const active = ('speechSynthesis' in window) && (speechSynthesis.speaking || speechSynthesis.pending);
+    if (active) {
+      if (window.__setSpeechWindow) window.__setSpeechWindow(1.2);
+    } else {
+      clearInterval(window.__extendTimer);
+      window.__extendTimer = null;
+    }
+  }, 500);
   chunks.forEach((s) => {
     if (!s) return;
     const u = new SpeechSynthesisUtterance(s);
@@ -724,6 +735,7 @@ function playBlob(blob) {
 
 function cancelSpeech() {
   speakGen += 1;
+  if (window.__extendTimer) { clearInterval(window.__extendTimer); window.__extendTimer = null; }
   if (window.__setSpeechWindow) window.__setSpeechWindow(0);
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
