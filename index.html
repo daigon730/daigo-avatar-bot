@@ -220,6 +220,7 @@
         <button type="button" data-gesture="bow">お辞儀</button>
         <button type="button" id="talk-toggle">話し手ぶり</button>
         <button type="button" id="think-toggle">考え中ポーズ</button>
+        <button type="button" id="mouth-test">口テスト</button>
       </div>
     </div>
     <input id="vrm-file" type="file" accept=".vrm" hidden>
@@ -281,8 +282,19 @@ let blinkTimer = 0;
 let nextBlink = 2.0;
 let blinkPhase = -1;       // -1: まばたきしていない
 
-const EXPR_ALIASES = { aa: ['aa', 'a'], blink: ['blink'] };
+const EXPR_ALIASES = { aa: ['aa', 'a', 'A'], blink: ['blink', 'Blink'] };
 const exprNameCache = {};
+let mouthMorph = null;  // { mesh, index } 口のモーフを直接制御するための参照
+let blinkMorph = null;  // { mesh, index } まばたき用
+let mouthTestUntil = -1;
+function applyMouth(v) {
+  if (mouthMorph) { mouthMorph.mesh.morphTargetInfluences[mouthMorph.index] = v; return; }
+  setExpr('aa', v);
+}
+function applyBlink(v) {
+  if (blinkMorph) { blinkMorph.mesh.morphTargetInfluences[blinkMorph.index] = v; return; }
+  setExpr('blink', v);
+}
 function setExpr(name, value) {
   if (!vrm || !vrm.expressionManager) return;
   try {
@@ -440,18 +452,20 @@ function animate() {
     if (blinkPhase >= 0) {
       blinkPhase += delta / 0.18;
       const v = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
-      setExpr('blink', Math.max(0, Math.min(1, v)));
+      applyBlink(Math.max(0, Math.min(1, v)));
       if (blinkPhase >= 1) {
         blinkPhase = -1;
-        setExpr('blink', 0);
+        applyBlink(0);
         nextBlink = 2.2 + Math.random() * 2.4;
       }
     }
-    // 口の動き：返答表示中／発声中だけ「あ」を波打たせる
-    if (typingActive || speechActive) {
-      setExpr('aa', 0.3 + 0.28 * (0.5 + 0.5 * Math.sin(t * 26)) * (0.6 + 0.4 * Math.sin(t * 7.3)));
+    // 口の動き：返答表示中／発声中だけ「あ」を波打たせる（口テスト中は大きく開く）
+    if (t < mouthTestUntil) {
+      applyMouth(0.85);
+    } else if (typingActive || speechActive) {
+      applyMouth(0.3 + 0.28 * (0.5 + 0.5 * Math.sin(t * 26)) * (0.6 + 0.4 * Math.sin(t * 7.3)));
     } else {
-      setExpr('aa', 0);
+      applyMouth(0);
     }
     vrm.update(delta);
   }
@@ -481,9 +495,18 @@ async function loadVRM(file) {
       VRMUtils.rotateVRM0(vrm);
     }
     scene.add(vrm.scene);
+    mouthMorph = null;
+    blinkMorph = null;
+    vrm.scene.traverse((obj) => {
+      if (obj.isMesh && obj.morphTargetDictionary) {
+        const d = obj.morphTargetDictionary;
+        if (!mouthMorph && d['Fcl_MTH_A'] !== undefined) mouthMorph = { mesh: obj, index: d['Fcl_MTH_A'] };
+        if (!blinkMorph && d['Fcl_EYE_Close'] !== undefined) blinkMorph = { mesh: obj, index: d['Fcl_EYE_Close'] };
+      }
+    });
     poseArmsDown();
     frameAvatar();
-    stageStatus.textContent = 'アバター表示中';
+    stageStatus.textContent = mouthMorph ? 'アバター表示中' : 'アバター表示中（口モーフ未検出）';
   } catch (e) {
     console.error(e);
     stageStatus.textContent = '読み込みに失敗しました：' + (e && e.message ? e.message : e);
@@ -522,6 +545,9 @@ function wireToggle(id, setter) {
 }
 wireToggle('talk-toggle', (v) => window.__setManualTalk(v));
 wireToggle('think-toggle', (v) => window.__setThinking(v));
+document.getElementById('mouth-test').addEventListener('click', () => {
+  mouthTestUntil = clock.elapsedTime + 1.2;
+});
 </script>
 <script>
 /* ============ チャット ============ */
