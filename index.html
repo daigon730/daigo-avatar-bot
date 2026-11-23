@@ -625,11 +625,26 @@ function pickJaVoice() {
   return voices.find(v => /ichiro|otoya/i.test(v.name)) || voices[0];
 }
 
-let speechQueue = 0;
+let watchTimer = null;
+function watchSpeechSynthesis() {
+  // 発声イベント（onstart/onend）はブラウザ・音声の種類で発火しないことがあるため、
+  // speechSynthesis.speaking のポーリングで口の動きを駆動する
+  window.__setSpeech && window.__setSpeech(true);
+  if (watchTimer) return;
+  watchTimer = setInterval(() => {
+    const active = ('speechSynthesis' in window) && (speechSynthesis.speaking || speechSynthesis.pending);
+    if (!active) {
+      clearInterval(watchTimer);
+      watchTimer = null;
+      window.__setSpeech && window.__setSpeech(false);
+    }
+  }, 180);
+}
+
 function speakBrowserChunks(chunks) {
   if (!('speechSynthesis' in window)) return;
   const voice = pickJaVoice();
-  speechQueue = 0;
+  watchSpeechSynthesis();
   chunks.forEach((s) => {
     if (!s) return;
     const u = new SpeechSynthesisUtterance(s);
@@ -637,14 +652,8 @@ function speakBrowserChunks(chunks) {
     u.lang = 'ja-JP';
     u.rate = 1.05;
     u.pitch = 0.9;
-    speechQueue += 1;
     u.onstart = () => {
-      window.__setSpeech && window.__setSpeech(true);
       window.__playGesture && window.__playGesture('nod');
-    };
-    u.onend = u.onerror = () => {
-      speechQueue -= 1;
-      if (speechQueue <= 0) window.__setSpeech && window.__setSpeech(false);
     };
     speechSynthesis.speak(u);
   });
@@ -709,6 +718,7 @@ function playBlob(blob) {
 
 function cancelSpeech() {
   speakGen += 1;
+  if (watchTimer) { clearInterval(watchTimer); watchTimer = null; }
   if ('speechSynthesis' in window) speechSynthesis.cancel();
   if (currentAudio) { try { currentAudio.pause(); } catch (e) {} currentAudio = null; }
   window.__setSpeech && window.__setSpeech(false);
@@ -731,6 +741,7 @@ async function speakText(text) {
         if (gen !== speakGen) return;
         const blob = await fetchAivisAudio(chunks[idx], speaker);
         if (gen !== speakGen) return;
+        window.__setSpeech && window.__setSpeech(true);
         await playBlob(blob);
       }
       window.__setSpeech && window.__setSpeech(false);
